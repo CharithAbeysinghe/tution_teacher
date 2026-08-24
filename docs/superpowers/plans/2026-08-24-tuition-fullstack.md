@@ -770,8 +770,8 @@ export function publicRoutes(db, { rateLimiting = true } = {}) {
 
 **Interfaces:**
 - Produces:
-  - `GET /api/materials?search=&subject=&grade=&free_only=true` → `[{ id, title, subject, grade, type, size_bytes, is_free, downloads_count, created_at }]`
-  - `POST /api/materials/unlock { code }` → `{ ok: true, student_name }` | 400 `{ error }`
+  - `GET /api/materials?search=&subject=&grade=&free_only=true` → `[{ id, title, subject, grade, type, sizeBytes, isFree, downloadsCount, createdAt }]`
+  - `POST /api/materials/unlock { code }` → `{ ok: true, studentName }` | 400 `{ error }`
   - `GET /api/materials/:id/download?code=` → file stream (Content-Disposition attachment); non-free without valid active-student code → 403; unknown id → 404; increments `downloads_count` on success
 
 - [x] **Step 1: Failing tests** — `tests/public-materials.test.js`
@@ -845,7 +845,7 @@ test('unlock validates active code', async (t) => {
   let body = await res.json();
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(body.student_name, 'Code Owner');
+  assert.equal(body.studentName, 'Code Owner');
   res = await fetch(`${base}/api/materials/unlock`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: 'NOPE1234' }) });
   assert.equal(res.status, 400);
 });
@@ -879,7 +879,7 @@ test('download unknown id -> 404', async (t) => {
     const code = String(req.body?.code || '').trim().toUpperCase();
     const row = db.prepare(`SELECT full_name FROM students WHERE access_code = ? AND status = 'active'`).get(code);
     if (!row) return res.status(400).json({ error: 'Invalid or expired access code' });
-    res.json({ ok: true, student_name: row.full_name });
+    res.json({ ok: true, studentName: row.full_name });
   });
 
   router.get('/materials/:id/download', (req, res) => {
@@ -1152,7 +1152,7 @@ Also add a login rate limiter: wrap handler — `router.post('/login', mkLimiter
 
 **Interfaces:**
 - Produces:
-  - `GET /api/admin/students?status=&search=&page=1&per_page=20` → `{ data: Student[], total, page, per_page }`; Student includes joined `class_subject`, `class_grade`
+  - `GET /api/admin/students?status=&search=&page=1&perPage=20` → `{ data: Student[], total, page, perPage }`; Student includes joined `class_subject`, `class_grade`
   - `POST /api/admin/students { name*, phone*, grade*, subject*, medium?, status?, enrolledAt? }` → 201 Student (direct-add defaults active/enrolled today/access code minted)
   - `PUT /api/admin/students/:id` partial `{ fullName?, studentPhone?, parentName?, parentPhone?, grade?, subject?, medium?, registeredClassId? , address?, email?, school? }` → updated Student
   - `PATCH /api/admin/students/:id/status { status }` → Student; transition-to-active mints access_code if missing + fills enrolled_at
@@ -1195,10 +1195,10 @@ test('list pagination, status filter, search', async (t) => {
   let page = await res.json();
   assert.equal(page.total, 2);
 
-  res = await fetch(`${base}/api/admin/students?page=1&per_page=2&status=pending`, { headers: { cookie } });
+  res = await fetch(`${base}/api/admin/students?page=1&perPage=2&status=pending`, { headers: { cookie } });
   page = await res.json();
   assert.equal(page.data.length, 2);
-  assert.equal(page.per_page, 2);
+  assert.equal(page.perPage, 2);
 
   res = await fetch(`${base}/api/admin/students`, { method: 'POST', headers: { ...jsonHeaders, cookie }, body: JSON.stringify({ name: 'Zack Zone', phone: '0710000001', grade: 'Grade 10', subject: 'Mathematics' }) });
   assert.equal(res.status, 201);
@@ -1296,7 +1296,7 @@ Endpoints:
   router.get('/students', requireAdmin, (req, res) => {
     const { status, search } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const perPage = Math.min(100, Math.max(1, parseInt(req.query.per_page) || 20));
+    const perPage = Math.min(100, Math.max(1, parseInt(req.query.perPage) || 20));
     const where = []; const params = [];
     if (status && ['pending', 'active', 'inactive'].includes(status)) { where.push('s.status = ?'); params.push(status); }
     if (search) { where.push('(s.full_name LIKE ? OR s.student_phone LIKE ? OR s.parent_phone LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
@@ -1304,7 +1304,7 @@ Endpoints:
     const total = db.prepare(`SELECT COUNT(*) c FROM students s ${whereSql}`).get(...params).c;
     const rows = db.prepare(`${studentSelect} ${whereSql} ORDER BY s.created_at DESC, s.id DESC LIMIT ? OFFSET ?`)
       .all(...params, perPage, (page - 1) * perPage);
-    res.json({ data: rows.map(mapStudent), total, page, per_page: perPage });
+    res.json({ data: rows.map(mapStudent), total, page, perPage });
   });
 
   const GRADES = ['Grade 6', 'Grade 7', 'Grade 8', 'Grade 9', 'Grade 10', 'Grade 11'];
@@ -1939,7 +1939,7 @@ export interface TuitionClass {
 }
 export interface Announcement { id: number; title: string; content: string; type: 'general'|'important'|'warning'|'info'|'new'; tags: string[]; publishedAt: string }
 export interface Material { id: number; title: string; subject: string; grade: string; type: 'pdf'|'video'|'image'; sizeBytes: number; isFree: boolean; downloadsCount: number; createdAt: string }
-export interface Paginated<T> { data: T[]; total: number; page: number; per_page: number }
+export interface Paginated<T> { data: T[]; total: number; page: number; perPage: number }
 export interface Student {
   id: number; fullName: string; preferredGrade: string | null; preferredSubject: string; preferredMedium: string | null;
   studentPhone: string | null; parentName: string | null; parentPhone: string | null; email: string | null; school: string | null;
