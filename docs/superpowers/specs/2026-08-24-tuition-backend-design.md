@@ -167,7 +167,7 @@ explicit mapping in insert/update code; errors as `{ error: string }` (4xx/5xx) 
 | GET `/api/timetable` | grouped `{ day_of_week, sessions[] }` Mon–Sun, ordered |
 | GET `/api/announcements` | ordered by published_at DESC |
 | GET `/api/materials?search=&subject=&grade=&free_only=true` | metadata incl. `downloads_count`; no file paths; `search` matches title (LIKE) or subject |
-| POST `/api/materials/unlock` `{ code }` | 200 `{ ok:true, student_name }` if code belongs to an active student |
+| POST `/api/materials/unlock` `{ code }` | 200 `{ ok:true, studentName }` if code belongs to an active student |
 | GET `/api/materials/:id/download?code=` | free → streams file, counts download. Non-free → requires valid active-student code, else 403 |
 | POST `/api/registrations` | public form; throttled (e.g. 10/hour/IP); 201 `{ id }` |
 | POST `/api/contact-messages` | throttled (e.g. 10/hour/IP); 201 `{ id }` |
