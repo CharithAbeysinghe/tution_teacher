@@ -20,6 +20,13 @@ function fixtureActiveStudentWithCode(db) {
   return code;
 }
 
+function fixtureNonActiveStudentWithCode(db, status) {
+  const code = 'AC' + Math.random().toString(36).slice(2, 10).toUpperCase();
+  db.prepare(`INSERT INTO students (full_name, preferred_subject, preferred_medium, status, access_code, enrolled_at)
+    VALUES ('Dormant Owner', 'Mathematics', 'Sinhala', ?, ?, '2024-09-01')`).run(status, code);
+  return code;
+}
+
 test('materials list supports search/subject/free filters', async (t) => {
   const { db, base, uploadsDir } = makeTestEnv(t);
   fixtureMaterial(db, uploadsDir, { isFree: true });
@@ -57,6 +64,29 @@ test('member material requires valid active access code', async (t) => {
   assert.equal(res.status, 403);
   res = await fetch(`${base}/api/materials/${m.id}/download?code=${code}`);
   assert.equal(res.status, 200);
+});
+
+test('non-active student with well-formed code is rejected for member material', async (t) => {
+  const { db, base, uploadsDir } = makeTestEnv(t);
+  const m = fixtureMaterial(db, uploadsDir, { isFree: false });
+  const pendingCode = fixtureNonActiveStudentWithCode(db, 'pending');
+  const inactiveCode = fixtureNonActiveStudentWithCode(db, 'inactive');
+
+  let res = await fetch(`${base}/api/materials/${m.id}/download?code=${pendingCode}`);
+  assert.equal(res.status, 403);
+  res = await fetch(`${base}/api/materials/${m.id}/download?code=${inactiveCode}`);
+  assert.equal(res.status, 403);
+});
+
+test('rejected member download leaves downloads_count unchanged', async (t) => {
+  const { db, base, uploadsDir } = makeTestEnv(t);
+  const m = fixtureMaterial(db, uploadsDir, { isFree: false });
+  const dormantCode = fixtureNonActiveStudentWithCode(db, 'inactive');
+
+  await fetch(`${base}/api/materials/${m.id}/download`);
+  await fetch(`${base}/api/materials/${m.id}/download?code=WRONGCODE1`);
+  await fetch(`${base}/api/materials/${m.id}/download?code=${dormantCode}`);
+  assert.equal(db.prepare('SELECT downloads_count FROM materials WHERE id=?').get(m.id).downloads_count, 0);
 });
 
 test('unlock validates active code', async (t) => {
