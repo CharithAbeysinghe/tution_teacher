@@ -31,7 +31,7 @@ export function buildApp({ db, uploadsDir, rateLimiting = true }) {
     httpOnly: true,
   }));
 
-  app.use('/api', publicRoutes(db, { rateLimiting }));
+  app.use('/api', publicRoutes(db, { rateLimiting, uploadsDir }));
   app.use('/api/admin', adminRoutes(db, { uploadsDir, rateLimiting }));
 
   // JSON 404 for unknown api paths
