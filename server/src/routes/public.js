@@ -2,6 +2,8 @@ import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
+import { validate } from '../middleware/validate.js';
 
 const GRADES = ['Grade 6', 'Grade 7', 'Grade 8', 'Grade 9', 'Grade 10', 'Grade 11'];
 const SUBJECTS = ['Mathematics', 'Science', 'English'];
@@ -91,6 +93,49 @@ export function publicRoutes(db, { rateLimiting = true, uploadsDir } = {}) {
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File missing' });
     db.prepare('UPDATE materials SET downloads_count = downloads_count + 1 WHERE id = ?').run(mat.id);
     res.download(filePath, mat.original_name);
+  });
+
+  const phoneRe = /^[0-9+\-\s]{7,15}$/;
+  const registrationSchema = z.object({
+    fullName: z.string().trim().min(1, 'Full name is required'),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
+    grade: z.enum(GRADES),
+    school: z.string().trim().min(1, 'School is required'),
+    parentName: z.string().trim().min(1, 'Parent/guardian name is required'),
+    parentPhone: z.string().regex(phoneRe, 'Enter a valid phone number'),
+    studentPhone: z.string().regex(phoneRe).optional().or(z.literal('')),
+    email: z.string().email('Invalid email').optional().or(z.literal('')),
+    address: z.string().optional().or(z.literal('')),
+    subject: z.enum(SUBJECTS),
+    medium: z.enum(['Sinhala', 'English']),
+    previousResults: z.string().optional().or(z.literal('')),
+    howDidYouHear: z.string().optional().or(z.literal('')),
+  });
+
+  router.post('/registrations', intakeLimiter, validate(registrationSchema), (req, res) => {
+    const b = req.body;
+    const info = db.prepare(`
+      INSERT INTO students (full_name, date_of_birth, school, parent_name, parent_phone, student_phone, email, address,
+                            preferred_grade, preferred_subject, preferred_medium, previous_results, source, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+    `).run(b.fullName, b.dateOfBirth, b.school, b.parentName, b.parentPhone,
+           b.studentPhone || null, b.email || null, b.address || null,
+           b.grade, b.subject, b.medium, b.previousResults || null, b.howDidYouHear || null);
+    res.status(201).json({ id: Number(info.lastInsertRowid) });
+  });
+
+  const contactSchema = z.object({
+    name: z.string().trim().min(1, 'Name is required'),
+    phone: z.string().regex(phoneRe).optional().or(z.literal('')),
+    email: z.string().email('Invalid email').optional().or(z.literal('')),
+    message: z.string().trim().min(1, 'Message is required'),
+  });
+
+  router.post('/contact-messages', intakeLimiter, validate(contactSchema), (req, res) => {
+    const b = req.body;
+    const info = db.prepare('INSERT INTO contact_messages (name, phone, email, message) VALUES (?, ?, ?, ?)')
+      .run(b.name, b.phone || null, b.email || null, b.message);
+    res.status(201).json({ id: Number(info.lastInsertRowid) });
   });
 
   return router;
