@@ -17,7 +17,7 @@ export function ContactPage() {
     setSubmitting(true);
     setServerErrors({});
     try {
-      await api.post("/api/contacts", form);
+      await  api.post("/api/contact-messages", form);
       setSent(true);
     } catch (err: any) {
       setServerErrors(err.errors ?? {});
