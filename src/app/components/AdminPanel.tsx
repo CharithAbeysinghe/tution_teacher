@@ -3,8 +3,8 @@ import { Users, BookOpen, Bell, FileText, BarChart3, Plus, Trash2, Edit2, X, Tre
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../lib/api";
 import { useApi } from "../lib/hooks";
-import type { AdminUser, DashboardStats, Student, Paginated, TuitionClass } from "../lib/types";
-import { scheduleLabel, DAY_NAMES, fmtTime } from "../lib/format";
+import type { AdminUser, Announcement, ContactMessage, DashboardStats, Material, Paginated, Student, TuitionClass } from "../lib/types";
+import { scheduleLabel, DAY_NAMES, fmtTime, humanSize } from "../lib/format";
 
 const GRADES = ["Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11"];
 const SUBJECTS = ["Mathematics", "Science", "English"];
@@ -86,6 +86,34 @@ export function AdminPanel() {
   const [classForm, setClassForm] = useState<ClassForm>(emptyClassForm);
   const [classFormErrors, setClassFormErrors] = useState<Record<string, string>>({});
   const [classSaving, setClassSaving] = useState(false);
+
+  // Announcements state
+  const [annTitle, setAnnTitle] = useState("");
+  const [annContent, setAnnContent] = useState("");
+  const [annType, setAnnType] = useState<Announcement["type"]>("general");
+  const [annSaving, setAnnSaving] = useState(false);
+  const { data: announcements, loading: annLoading, error: annError, refresh: refreshAnnouncements } = useApi<Announcement[]>(
+    user ? "/api/admin/announcements" : null
+  );
+
+  // Materials state
+  const [matTitle, setMatTitle] = useState("");
+  const [matSubject, setMatSubject] = useState("Mathematics");
+  const [matGrade, setMatGrade] = useState("Grade 6");
+  const [matType, setMatType] = useState<Material["type"]>("pdf");
+  const [matFree, setMatFree] = useState(false);
+  const [matFile, setMatFile] = useState<File | null>(null);
+  const [matSaving, setMatSaving] = useState(false);
+  const { data: materials, loading: matLoading, error: matError, refresh: refreshMaterials } = useApi<Material[]>(
+    user ? "/api/admin/materials" : null
+  );
+
+  // Messages state
+  const { data: messages, loading: msgLoading, error: msgError, refresh: refreshMessages } = useApi<ContactMessage[]>(
+    user ? "/api/admin/messages" : null
+  );
+
+  const unreadCount = messages?.filter(m => !m.readAt).length ?? 0;
 
   const { data: classes, loading: classesLoading, error: classesError, refresh: refreshClasses } = useApi<TuitionClass[]>(
     user ? "/api/admin/classes" : null
@@ -306,6 +334,98 @@ export function AdminPanel() {
     }));
   };
 
+  // Announcements handlers
+  const handlePublishAnnouncement = async () => {
+    setAnnSaving(true);
+    try {
+      await api.post("/api/admin/announcements", { title: annTitle, content: annContent, type: annType });
+      setAnnTitle("");
+      setAnnContent("");
+      setAnnType("general");
+      refreshAnnouncements();
+    } catch (e: any) {
+      alert(e.message || "Failed to publish announcement");
+    } finally {
+      setAnnSaving(false);
+    }
+  };
+
+  const handleDeleteAnnouncement = async (id: number) => {
+    if (!confirm("Delete this announcement?")) return;
+    try {
+      await api.del(`/api/admin/announcements/${id}`);
+      refreshAnnouncements();
+    } catch (e: any) {
+      alert(e.message || "Failed to delete announcement");
+    }
+  };
+
+  // Materials handlers
+  const handleUploadMaterial = async () => {
+    if (!matFile) { alert("Please select a file"); return; }
+    setMatSaving(true);
+    const fd = new FormData();
+    fd.append("title", matTitle);
+    fd.append("subject", matSubject);
+    fd.append("grade", matGrade);
+    fd.append("type", matType);
+    fd.append("isFree", String(matFree));
+    fd.append("file", matFile);
+    try {
+      await api.upload("/api/admin/materials", fd);
+      setMatTitle("");
+      setMatSubject("Mathematics");
+      setMatGrade("Grade 6");
+      setMatType("pdf");
+      setMatFree(false);
+      setMatFile(null);
+      refreshMaterials();
+    } catch (e: any) {
+      alert(e.message || "Failed to upload material");
+    } finally {
+      setMatSaving(false);
+    }
+  };
+
+  const handleToggleFree = async (m: Material) => {
+    try {
+      const res = await api.patch<{ ok: boolean; isFree: boolean }>(`/api/admin/materials/${m.id}/free-toggle`);
+      refreshMaterials();
+    } catch (e: any) {
+      alert(e.message || "Failed to toggle free access");
+    }
+  };
+
+  const handleDeleteMaterial = async (m: Material) => {
+    if (!confirm(`Delete "${m.title}"?`)) return;
+    try {
+      await api.del(`/api/admin/materials/${m.id}`);
+      refreshMaterials();
+    } catch (e: any) {
+      alert(e.message || "Failed to delete material");
+    }
+  };
+
+  // Messages handlers
+  const handleMarkRead = async (msg: ContactMessage) => {
+    try {
+      await api.patch(`/api/admin/messages/${msg.id}`);
+      refreshMessages();
+    } catch (e: any) {
+      alert(e.message || "Failed to mark as read");
+    }
+  };
+
+  const handleDeleteMessage = async (msg: ContactMessage) => {
+    if (!confirm("Delete this message?")) return;
+    try {
+      await api.del(`/api/admin/messages/${msg.id}`);
+      refreshMessages();
+    } catch (e: any) {
+      alert(e.message || "Failed to delete message");
+    }
+  };
+
   const students = paginatedStudents?.data ?? [];
   const totalPages = paginatedStudents ? Math.max(1, Math.ceil(paginatedStudents.total / paginatedStudents.perPage)) : 1;
 
@@ -395,6 +515,9 @@ export function AdminPanel() {
               >
                 <Icon size={16} />
                 {tab.label}
+                {tab.id === "messages" && unreadCount > 0 && (
+                  <span className="ml-auto px-1.5 py-0.5 rounded-full text-[0.65rem] font-bold" style={{ background: "#e74c3c", color: "#fff" }}>{unreadCount}</span>
+                )}
               </button>
             );
           })}
@@ -406,6 +529,9 @@ export function AdminPanel() {
             {tabs.map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className="px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ background: activeTab === tab.id ? "var(--primary)" : "var(--secondary)", color: activeTab === tab.id ? "#ffffff" : "var(--foreground)", fontSize: "0.8rem" }}>
                 {tab.label}
+                {tab.id === "messages" && unreadCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[0.6rem] font-bold" style={{ background: "#e74c3c", color: "#fff" }}>{unreadCount}</span>
+                )}
               </button>
             ))}
           </div>
@@ -770,84 +896,186 @@ export function AdminPanel() {
           {/* Announcements */}
           {activeTab === "announcements" && (
             <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700 }}>Announcements</h2>
-                <button className="flex items-center gap-2 px-4 py-2 rounded-lg" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 500, fontSize: "0.875rem" }}>
-                  <Plus size={15} /> New Announcement
-                </button>
-              </div>
-              <div className="p-6 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                <div className="flex flex-col gap-3 mb-4">
+              <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Announcements</h2>
+              <div className="p-6 rounded-2xl mb-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                <div className="flex flex-col gap-3">
                   <div>
                     <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.35rem" }}>Title</label>
-                    <input placeholder="Announcement title" className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                    <input value={annTitle} onChange={e => setAnnTitle(e.target.value)} placeholder="Announcement title" className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
                   </div>
                   <div>
                     <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.35rem" }}>Content</label>
-                    <textarea rows={4} placeholder="Write the announcement details here…" className="w-full px-4 py-2.5 rounded-lg outline-none resize-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                    <textarea rows={4} value={annContent} onChange={e => setAnnContent(e.target.value)} placeholder="Write the announcement details here…" className="w-full px-4 py-2.5 rounded-lg outline-none resize-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
                   </div>
                   <div className="flex gap-3">
-                    <select className="px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }}>
-                      <option>Type: General</option>
-                      <option>Type: Important</option>
-                      <option>Type: Warning</option>
-                      <option>Type: Info</option>
+                    <select value={annType} onChange={e => setAnnType(e.target.value as Announcement["type"])} className="px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }}>
+                      <option value="general">General</option>
+                      <option value="important">Important</option>
+                      <option value="warning">Warning</option>
+                      <option value="info">Info</option>
+                      <option value="new">New</option>
                     </select>
-                    <button className="px-5 py-2 rounded-lg" style={{ background: "var(--accent)", color: "var(--primary)", fontWeight: 600, fontSize: "0.875rem" }}>Publish</button>
+                    <button onClick={handlePublishAnnouncement} disabled={annSaving || !annTitle.trim() || !annContent.trim()} className="px-5 py-2 rounded-lg disabled:opacity-50" style={{ background: "var(--accent)", color: "var(--primary)", fontWeight: 600, fontSize: "0.875rem" }}>{annSaving ? "Publishing…" : "Publish"}</button>
                   </div>
                 </div>
               </div>
+              {annError && <p style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "1rem" }}>{annError}</p>}
+              {annLoading ? (
+                <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Loading announcements…</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {(announcements ?? []).map(ann => {
+                    const chipBg = ann.type === "important" ? "#fff3e0" : ann.type === "warning" ? "#fce4ec" : ann.type === "info" ? "#e3f2fd" : ann.type === "new" ? "#e8f5e9" : "#f3f4f6";
+                    const chipFg = ann.type === "important" ? "#e65100" : ann.type === "warning" ? "#c62828" : ann.type === "info" ? "#1565c0" : ann.type === "new" ? "#2e7d32" : "#555";
+                    return (
+                      <div key={ann.id} className="p-5 rounded-2xl flex items-start justify-between" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="px-2 py-0.5 rounded-full text-[0.7rem] font-semibold" style={{ background: chipBg, color: chipFg }}>{ann.type}</span>
+                            <span style={{ color: "var(--muted-foreground)", fontSize: "0.78rem" }}>{ann.publishedAt}</span>
+                          </div>
+                          <h3 style={{ color: "var(--primary)", fontWeight: 600, fontSize: "0.95rem", marginBottom: "0.25rem" }}>{ann.title}</h3>
+                          <p style={{ color: "var(--foreground)", fontSize: "0.875rem", lineHeight: 1.5 }}>{ann.content}</p>
+                        </div>
+                        <button onClick={() => handleDeleteAnnouncement(ann.id)} title="Delete" className="ml-4 p-1.5 rounded-md hover:opacity-70 transition-opacity shrink-0" style={{ background: "#fdf2f2" }}>
+                          <Trash2 size={14} style={{ color: "#e74c3c" }} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {(announcements ?? []).length === 0 && <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>No announcements yet.</p>}
+                </div>
+              )}
             </div>
           )}
 
           {/* Materials */}
           {activeTab === "materials" && (
             <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700 }}>Materials</h2>
-                <button className="flex items-center gap-2 px-4 py-2 rounded-lg" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 500, fontSize: "0.875rem" }}>
-                  <Plus size={15} /> Upload Material
-                </button>
-              </div>
-              <div className="p-6 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Materials</h2>
+              <div className="p-6 rounded-2xl mb-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                 <div className="flex flex-col gap-3">
                   <div>
                     <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.35rem" }}>Title</label>
-                    <input placeholder="Material title" className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                    <input value={matTitle} onChange={e => setMatTitle(e.target.value)} placeholder="Material title" className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {["Subject", "Grade", "Type"].map((label, i) => (
-                      <div key={i}>
-                        <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>{label}</label>
-                        <select className="w-full px-3 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }}>
-                          {label === "Subject" && ["Mathematics", "Science", "English"].map(o => <option key={o}>{o}</option>)}
-                          {label === "Grade" && ["Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11"].map(o => <option key={o}>{o}</option>)}
-                          {label === "Type" && ["PDF", "Video", "Image"].map(o => <option key={o}>{o}</option>)}
-                        </select>
-                      </div>
-                    ))}
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Subject</label>
+                      <select value={matSubject} onChange={e => setMatSubject(e.target.value)} className="w-full px-3 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        {SUBJECTS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Grade</label>
+                      <select value={matGrade} onChange={e => setMatGrade(e.target.value)} className="w-full px-3 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        {GRADES.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Type</label>
+                      <select value={matType} onChange={e => setMatType(e.target.value as Material["type"])} className="w-full px-3 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        <option value="pdf">PDF</option>
+                        <option value="video">Video</option>
+                        <option value="image">Image</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <label className="flex-1 flex items-center justify-center py-8 rounded-xl cursor-pointer" style={{ border: "2px dashed var(--border)", color: "var(--muted-foreground)", fontSize: "0.875rem" }}>
-                      <input type="file" className="hidden" />
-                      Click to upload file (PDF, MP4, etc.)
+                    <label className="flex-1 flex items-center justify-center py-8 rounded-xl cursor-pointer" style={{ border: `2px dashed ${matFile ? "var(--accent)" : "var(--border)"}`, color: matFile ? "var(--primary)" : "var(--muted-foreground)", fontSize: "0.875rem" }}>
+                      <input type="file" className="hidden" onChange={e => setMatFile(e.target.files?.[0] ?? null)} />
+                      {matFile ? matFile.name : "Click to upload file (PDF, MP4, etc.)"}
                     </label>
                   </div>
                   <div className="flex items-center gap-2">
-                    <input type="checkbox" id="freeAccess" className="rounded" />
+                    <input type="checkbox" id="freeAccess" checked={matFree} onChange={e => setMatFree(e.target.checked)} className="rounded" />
                     <label htmlFor="freeAccess" style={{ color: "var(--foreground)", fontSize: "0.875rem" }}>Free access (no login required)</label>
                   </div>
-                  <button className="px-5 py-2.5 rounded-lg w-fit" style={{ background: "var(--accent)", color: "var(--primary)", fontWeight: 600 }}>Upload Material</button>
+                  <button onClick={handleUploadMaterial} disabled={matSaving || !matTitle.trim() || !matFile} className="px-5 py-2.5 rounded-lg w-fit disabled:opacity-50" style={{ background: "var(--accent)", color: "var(--primary)", fontWeight: 600 }}>{matSaving ? "Uploading…" : "Upload Material"}</button>
                 </div>
               </div>
+              {matError && <p style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "1rem" }}>{matError}</p>}
+              {matLoading ? (
+                <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Loading materials…</p>
+              ) : (
+                <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+                  <table className="w-full">
+                    <thead>
+                      <tr style={{ background: "var(--secondary)" }}>
+                        {["Title", "Size", "Access", "Downloads", "Actions"].map(h => (
+                          <th key={h} className="text-left px-4 py-3" style={{ color: "var(--muted-foreground)", fontSize: "0.78rem", fontWeight: 600, letterSpacing: "0.05em" }}>{h.toUpperCase()}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(materials ?? []).map((m, i) => (
+                        <tr key={m.id} style={{ borderTop: "1px solid var(--border)", background: i % 2 === 0 ? "var(--card)" : "var(--background)" }}>
+                          <td className="px-4 py-3" style={{ color: "var(--primary)", fontWeight: 500, fontSize: "0.88rem" }}>{m.title}</td>
+                          <td className="px-4 py-3" style={{ color: "var(--muted-foreground)", fontSize: "0.82rem" }}>{humanSize(m.sizeBytes)}</td>
+                          <td className="px-4 py-3">
+                            <button onClick={() => handleToggleFree(m)} className="px-2 py-0.5 rounded-full text-[0.72rem] font-semibold cursor-pointer hover:opacity-80 transition-opacity" style={{ background: m.isFree ? "#e6f7ee" : "var(--secondary)", color: m.isFree ? "#1e7e34" : "var(--muted-foreground)" }}>
+                              {m.isFree ? "Free" : "Members"}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3" style={{ color: "var(--muted-foreground)", fontSize: "0.82rem" }}>{m.downloadsCount}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1">
+                              <a href={`/api/materials/${m.id}/download`} className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "var(--secondary)" }} title="Download">
+                                <FileText size={14} style={{ color: "var(--primary)" }} />
+                              </a>
+                              <button onClick={() => handleDeleteMaterial(m)} title="Delete" className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "#fdf2f2" }}>
+                                <Trash2 size={14} style={{ color: "#e74c3c" }} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {(materials ?? []).length === 0 && (
+                        <tr><td colSpan={5} className="px-4 py-8 text-center" style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>No materials uploaded yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
           {/* Messages */}
           {activeTab === "messages" && (
             <div>
-              <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Messages</h2>
-              <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Coming in next step</p>
+              <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Messages {unreadCount > 0 && <span style={{ color: "#e74c3c", fontSize: "0.9rem", fontWeight: 500 }}>({unreadCount} unread)</span>}</h2>
+              {msgError && <p style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "1rem" }}>{msgError}</p>}
+              {msgLoading ? (
+                <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Loading messages…</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {(messages ?? []).map(msg => (
+                    <div key={msg.id} className="p-5 rounded-2xl flex items-start justify-between" style={{ background: "var(--card)", border: `1px solid ${!msg.readAt ? "var(--accent)" : "var(--border)"}`, borderLeftWidth: !msg.readAt ? "3px" : "1px" }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {!msg.readAt && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#e74c3c" }} />}
+                          <span style={{ color: !msg.readAt ? "var(--primary)" : "var(--foreground)", fontWeight: !msg.readAt ? 600 : 400, fontSize: "0.95rem" }}>{msg.name}</span>
+                          {msg.phone && <span style={{ color: "var(--muted-foreground)", fontSize: "0.78rem" }}>· {msg.phone}</span>}
+                          {msg.email && <span style={{ color: "var(--muted-foreground)", fontSize: "0.78rem" }}>· {msg.email}</span>}
+                          <span style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>· {msg.createdAt}</span>
+                        </div>
+                        <p style={{ color: "var(--foreground)", fontSize: "0.875rem", lineHeight: 1.5 }}>{msg.message}</p>
+                      </div>
+                      <div className="flex items-center gap-1 ml-4 shrink-0">
+                        {!msg.readAt && (
+                          <button onClick={() => handleMarkRead(msg)} title="Mark as read" className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "#e6f7ee" }}>
+                            <Check size={14} style={{ color: "#1e7e34" }} />
+                          </button>
+                        )}
+                        <button onClick={() => handleDeleteMessage(msg)} title="Delete" className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "#fdf2f2" }}>
+                          <Trash2 size={14} style={{ color: "#e74c3c" }} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {(messages ?? []).length === 0 && <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>No messages yet.</p>}
+                </div>
+              )}
             </div>
           )}
         </div>
