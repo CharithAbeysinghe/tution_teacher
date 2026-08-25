@@ -157,7 +157,7 @@ Conventions: base path `/api`; JSON bodies; **JSON payloads use camelCase keys**
 (matching the existing React form field names); SQLite columns stay snake_case with
 explicit mapping in insert/update code; errors as `{ error: string }` (4xx/5xx) or
 `{ errors: { field: message } }` (422 validation). All list endpoints return arrays or
-`{ data, total, page, per_page }` when paginated (admin students only).
+`{ data, total, page, perPage }` when paginated (admin students only).
 
 ### Public
 
