@@ -253,5 +253,63 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
     res.json({ ok: true });
   });
 
+  const annSchema = z.object({
+    title: z.string().trim().min(1),
+    content: z.string().trim().min(1),
+    type: z.enum(['general', 'important', 'warning', 'info', 'new']).default('general'),
+    tags: z.array(z.string().trim().min(1)).max(8).optional().default([]),
+  });
+  function mapAnnouncement(r) {
+    return { id: r.id, title: r.title, content: r.content, type: r.type, tags: JSON.parse(r.tags || '[]'), publishedAt: r.published_at, createdAt: r.created_at };
+  }
+
+  router.get('/announcements', authGuard, (req, res) => {
+    res.json(db.prepare('SELECT * FROM announcements ORDER BY published_at DESC, id DESC').all().map(mapAnnouncement));
+  });
+  router.post('/announcements', authGuard, (req, res) => {
+    const p = annSchema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.'), i.message])) });
+    const b = p.data;
+    const info = db.prepare('INSERT INTO announcements (title, content, type, tags) VALUES (?, ?, ?, ?)')
+      .run(b.title, b.content, b.type, JSON.stringify(b.tags));
+    res.status(201).json(mapAnnouncement(db.prepare('SELECT * FROM announcements WHERE id = ?').get(info.lastInsertRowid)));
+  });
+  router.put('/announcements/:id', authGuard, (req, res) => {
+    const existing = db.prepare('SELECT * FROM announcements WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const p = annSchema.partial().safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.'), i.message])) });
+    const b = p.data;
+    db.prepare(`UPDATE announcements SET title=?, content=?, type=?, tags=?, updated_at=datetime('now') WHERE id=?`)
+      .run(b.title ?? existing.title, b.content ?? existing.content, b.type ?? existing.type,
+           b.tags !== undefined ? JSON.stringify(b.tags) : existing.tags, existing.id);
+    res.json(mapAnnouncement(db.prepare('SELECT * FROM announcements WHERE id = ?').get(existing.id)));
+  });
+  router.delete('/announcements/:id', authGuard, (req, res) => {
+    const info = db.prepare('DELETE FROM announcements WHERE id = ?').run(req.params.id);
+    if (!info.changes) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  });
+
+  function mapMessage(r) {
+    return { id: r.id, name: r.name, phone: r.phone, email: r.email, message: r.message, readAt: r.read_at, createdAt: r.created_at };
+  }
+  router.get('/messages', authGuard, (req, res) => {
+    const sql = req.query.unreadOnly === '1'
+      ? 'SELECT * FROM contact_messages WHERE read_at IS NULL ORDER BY created_at DESC'
+      : 'SELECT * FROM contact_messages ORDER BY created_at DESC';
+    res.json(db.prepare(sql).all().map(mapMessage));
+  });
+  router.patch('/messages/:id/read', authGuard, (req, res) => {
+    const info = db.prepare(`UPDATE contact_messages SET read_at = datetime('now') WHERE id = ? AND read_at IS NULL`).run(req.params.id);
+    if (!info.changes) return res.status(404).json({ error: 'Not found or already read' });
+    res.json({ ok: true });
+  });
+  router.delete('/messages/:id', authGuard, (req, res) => {
+    const info = db.prepare('DELETE FROM contact_messages WHERE id = ?').run(req.params.id);
+    if (!info.changes) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  });
+
   return router;
 }
