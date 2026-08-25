@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeTestEnv, loginAsAdmin, jsonHeaders } from './helpers.js';
+import { makeTestEnv, loginAsAdmin } from './helpers.js';
 import { runSeed } from '../src/seed.js';
 
 async function adminEnv(t) {
