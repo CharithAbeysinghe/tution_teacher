@@ -93,7 +93,14 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
 
   const GRADES = ['Grade 6', 'Grade 7', 'Grade 8', 'Grade 9', 'Grade 10', 'Grade 11'];
   const SUBJECTS = ['Mathematics', 'Science', 'English'];
-  const newAccessCode = () => 'AC' + crypto.randomBytes(4).toString('hex').toUpperCase();
+  function mintUniqueAccessCode() {
+    for (let i = 0; i < 5; i++) {
+      const code = 'AC' + crypto.randomBytes(4).toString('hex').toUpperCase();
+      const exists = db.prepare('SELECT 1 FROM students WHERE access_code = ?').get(code);
+      if (!exists) return code;
+    }
+    throw new Error('Failed to generate unique access code after 5 attempts');
+  }
 
   router.post('/students', authGuard, (req, res) => {
     const schema = z.object({
@@ -109,7 +116,7 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
     if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.') || '_', i.message])) });
     const b = p.data;
     const today = new Date().toISOString().slice(0, 10);
-    const code = b.status === 'active' ? newAccessCode() : null;
+    const code = b.status === 'active' ? mintUniqueAccessCode() : null;
     const info = db.prepare(`INSERT INTO students (full_name, student_phone, preferred_grade, preferred_subject, preferred_medium, status, enrolled_at, access_code)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(b.name, b.phone, b.grade, b.subject, b.medium || 'Sinhala', b.status, b.enrolledAt || today, code);
     const row = db.prepare(`${studentSelect} WHERE s.id = ?`).get(info.lastInsertRowid);
@@ -164,13 +171,85 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
         enrolled_at = CASE WHEN ? = 'active' AND enrolled_at IS NULL THEN ? ELSE enrolled_at END,
         access_code = CASE WHEN ? = 'active' AND access_code IS NULL THEN ? ELSE access_code END,
         updated_at = datetime('now')
-      WHERE id = ?`).run(status, status, today, status, newAccessCode(), existing.id);
+      WHERE id = ?`).run(status, status, today, status, mintUniqueAccessCode(), existing.id);
     res.json(mapStudent(db.prepare(`${studentSelect} WHERE s.id = ?`).get(existing.id)));
   });
 
   router.delete('/students/:id', authGuard, (req, res) => {
     const info = db.prepare('DELETE FROM students WHERE id = ?').run(req.params.id);
     if (!info.changes) return res.status(404).json({ error: 'Student not found' });
+    res.json({ ok: true });
+  });
+
+  function classRowMapper(c) {
+    const enrolled = db.prepare(`SELECT COUNT(*) n FROM students WHERE registered_class_id = ? AND status = 'active'`).get(c.id).n;
+    return {
+      id: c.id, subject: c.subject, grade: c.grade, medium: c.medium, fee: c.fee,
+      description: c.description, capacity: c.capacity, isActive: !!c.is_active,
+      enrolled, seatsLeft: c.capacity - enrolled,
+      sessions: db.prepare('SELECT day_of_week AS dayOfWeek, start_time AS startTime, end_time AS endTime, room FROM class_sessions WHERE class_id = ? ORDER BY day_of_week, start_time').all(c.id),
+    };
+  }
+
+  const sessionSchema = z.object({
+    dayOfWeek: z.number().int().min(1).max(7),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    room: z.string().optional().default(''),
+  });
+  const classSchema = z.object({
+    subject: z.enum(SUBJECTS),
+    grade: z.enum(GRADES),
+    medium: z.enum(['Sinhala', 'English']),
+    fee: z.number().positive(),
+    capacity: z.number().int().positive(),
+    description: z.string().optional().default(''),
+    isActive: z.boolean().optional().default(true),
+    sessions: z.array(sessionSchema).min(1),
+  });
+
+  router.get('/classes', authGuard, (req, res) => {
+    res.json(db.prepare('SELECT * FROM classes ORDER BY id').all().map(classRowMapper));
+  });
+
+  const insertSessions = db.transaction((classId, sessions) => {
+    const st = db.prepare('INSERT INTO class_sessions (class_id, day_of_week, start_time, end_time, room) VALUES (?, ?, ?, ?, ?)');
+    for (const s of sessions) st.run(classId, s.dayOfWeek, s.startTime, s.endTime, s.room || '');
+  });
+
+  router.post('/classes', authGuard, (req, res) => {
+    const p = classSchema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.'), i.message])) });
+    const b = p.data;
+    const tx = db.transaction(() => {
+      const info = db.prepare('INSERT INTO classes (subject, grade, medium, fee, description, capacity, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(b.subject, b.grade, b.medium, b.fee, b.description, b.capacity, b.isActive ? 1 : 0);
+      insertSessions(Number(info.lastInsertRowid), b.sessions);
+      return Number(info.lastInsertRowid);
+    });
+    const id = tx();
+    res.status(201).json(classRowMapper(db.prepare('SELECT * FROM classes WHERE id = ?').get(id)));
+  });
+
+  router.put('/classes/:id', authGuard, (req, res) => {
+    const existing = db.prepare('SELECT * FROM classes WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Class not found' });
+    const p = classSchema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.'), i.message])) });
+    const b = p.data;
+    const tx = db.transaction(() => {
+      db.prepare(`UPDATE classes SET subject=?, grade=?, medium=?, fee=?, description=?, capacity=?, is_active=?, updated_at=datetime('now') WHERE id=?`)
+        .run(b.subject, b.grade, b.medium, b.fee, b.description, b.capacity, b.isActive ? 1 : 0, existing.id);
+      db.prepare('DELETE FROM class_sessions WHERE class_id = ?').run(existing.id);
+      insertSessions(existing.id, b.sessions);
+    });
+    tx();
+    res.json(classRowMapper(db.prepare('SELECT * FROM classes WHERE id = ?').get(existing.id)));
+  });
+
+  router.delete('/classes/:id', authGuard, (req, res) => {
+    const info = db.prepare('DELETE FROM classes WHERE id = ?').run(req.params.id);
+    if (!info.changes) return res.status(404).json({ error: 'Class not found' });
     res.json({ ok: true });
   });
 
