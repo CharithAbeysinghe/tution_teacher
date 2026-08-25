@@ -6,8 +6,7 @@ import crypto from 'node:crypto';
 import { publicRoutes } from './routes/public.js';
 import { adminRoutes } from './routes/admin.js';
 
-function getSessionSecret() {
-  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+function getSessionSecret(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const secretPath = path.join(dataDir, 'session-secret.txt');
   try {
@@ -19,13 +18,13 @@ function getSessionSecret() {
   return s;
 }
 
-export function buildApp({ db, uploadsDir, rateLimiting = true }) {
+export function buildApp({ db, uploadsDir, rateLimiting = true, dataDir }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json());
   app.use(cookieSession({
     name: 'session',
-    keys: [process.env.SESSION_SECRET || getSessionSecret()],
+    keys: [process.env.SESSION_SECRET || getSessionSecret(dataDir || process.env.DATA_DIR || path.join(process.cwd(), 'data'))],
     maxAge: 7 * 24 * 60 * 60 * 1000,
     sameSite: 'lax',
     httpOnly: true,

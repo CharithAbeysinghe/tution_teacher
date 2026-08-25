@@ -12,7 +12,7 @@ export function makeTestEnv(t) {
   runMigrations(db);
   const uploadsDir = path.join(dir, 'uploads', 'materials');
   fs.mkdirSync(uploadsDir, { recursive: true });
-  const app = buildApp({ db, uploadsDir, rateLimiting: false });
+  const app = buildApp({ db, uploadsDir, rateLimiting: false, dataDir: dir });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   t.after(() => {
