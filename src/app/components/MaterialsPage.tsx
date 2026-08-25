@@ -1,29 +1,50 @@
 import { FileText, Video, Download, Lock, Search } from "lucide-react";
 import { useState } from "react";
-
-const materials = [
-  { id: 1, title: "O/Level Mathematics — 2023 Past Paper (Sinhala)", subject: "Mathematics", grade: "Grade 11", type: "pdf", size: "2.4 MB", date: "2024-11-10", free: true, downloads: 245 },
-  { id: 2, title: "O/Level Mathematics — 2023 Past Paper (English)", subject: "Mathematics", grade: "Grade 11", type: "pdf", size: "2.1 MB", date: "2024-11-10", free: true, downloads: 189 },
-  { id: 3, title: "Algebra — Complete Notes (Grade 10)", subject: "Mathematics", grade: "Grade 10", type: "pdf", size: "3.8 MB", date: "2024-10-22", free: false, downloads: 102 },
-  { id: 4, title: "Statistics Practice Questions — Worksheet 1", subject: "Mathematics", grade: "Grade 10", type: "pdf", size: "1.2 MB", date: "2024-10-15", free: true, downloads: 178 },
-  { id: 5, title: "Science — Photosynthesis Video Lesson", subject: "Science", grade: "Grade 8", type: "video", size: "45 min", date: "2024-11-05", free: false, downloads: 67 },
-  { id: 6, title: "Science — Chemical Reactions Worksheet", subject: "Science", grade: "Grade 9", type: "pdf", size: "980 KB", date: "2024-11-01", free: true, downloads: 134 },
-  { id: 7, title: "English — Essay Writing Guide", subject: "English", grade: "Grade 7", type: "pdf", size: "1.6 MB", date: "2024-10-29", free: true, downloads: 98 },
-  { id: 8, title: "English Comprehension — Advanced Exercises", subject: "English", grade: "Grade 7", type: "pdf", size: "2.2 MB", date: "2024-10-18", free: false, downloads: 55 },
-];
+import { useApi } from "../lib/hooks";
+import { api } from "../lib/api";
+import { humanSize } from "../lib/format";
+import type { Material } from "../lib/types";
 
 const subjectFilters = ["All", "Mathematics", "Science", "English"];
 
 export function MaterialsPage() {
+  const { data: materials } = useApi<Material[]>("/api/materials");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("All");
   const [showFreeOnly, setShowFreeOnly] = useState(false);
+  const [unlockFor, setUnlockFor] = useState<number | null>(null);
+  const [unlockCode, setUnlockCode] = useState("");
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlockLoading, setUnlockLoading] = useState(false);
 
-  const filtered = materials.filter(m =>
+  const code = localStorage.getItem("member_access_code") || "";
+
+  const filtered = (materials ?? []).filter(m =>
     (selectedSubject === "All" || m.subject === selectedSubject) &&
-    (!showFreeOnly || m.free) &&
+    (!showFreeOnly || m.isFree) &&
     (m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.subject.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  function buildHref(mat: Material) {
+    const base = `/api/materials/${mat.id}/download`;
+    if (!mat.isFree && code) return `${base}?code=${encodeURIComponent(code)}`;
+    return base;
+  }
+
+  async function handleUnlock(matId: number) {
+    setUnlockLoading(true);
+    setUnlockError(null);
+    try {
+      await api.post("/api/materials/unlock", { code: unlockCode });
+      localStorage.setItem("member_access_code", unlockCode);
+      setUnlockFor(null);
+      setUnlockCode("");
+    } catch (e: any) {
+      setUnlockError(e.message || "Unlock failed");
+    } finally {
+      setUnlockLoading(false);
+    }
+  }
 
   return (
     <div style={{ fontFamily: "var(--font-body)" }}>
@@ -83,23 +104,78 @@ export function MaterialsPage() {
                   <span style={{ color: "var(--muted-foreground)", fontSize: "0.72rem" }}>·</span>
                   <span style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>{mat.grade}</span>
                   <span style={{ color: "var(--muted-foreground)", fontSize: "0.72rem" }}>·</span>
-                  <span style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>{mat.size}</span>
+                  <span style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>{humanSize(mat.sizeBytes)}</span>
                   <span style={{ color: "var(--muted-foreground)", fontSize: "0.72rem" }}>·</span>
-                  <span style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>{mat.downloads} downloads</span>
+                  <span style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>{mat.downloadsCount} downloads</span>
                 </div>
               </div>
-              <button
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg flex-shrink-0 hover:opacity-85 transition-opacity"
-                style={{
-                  background: mat.free ? "var(--accent)" : "var(--secondary)",
-                  color: mat.free ? "var(--primary)" : "var(--muted-foreground)",
-                  fontSize: "0.78rem",
-                  fontWeight: 600,
-                }}
-              >
-                {mat.free ? <Download size={13} /> : <Lock size={13} />}
-                {mat.free ? "Free" : "Members"}
-              </button>
+              {mat.isFree ? (
+                <a
+                  href={buildHref(mat)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg flex-shrink-0 hover:opacity-85 transition-opacity"
+                  style={{
+                    background: "var(--accent)",
+                    color: "var(--primary)",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                  }}
+                >
+                  <Download size={13} />
+                  Free
+                </a>
+              ) : code ? (
+                <a
+                  href={buildHref(mat)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg flex-shrink-0 hover:opacity-85 transition-opacity"
+                  style={{
+                    background: "var(--secondary)",
+                    color: "var(--muted-foreground)",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                  }}
+                >
+                  <Download size={13} />
+                  Members
+                </a>
+              ) : (
+                <div className="flex flex-col items-end flex-shrink-0">
+                  <button
+                    onClick={() => { setUnlockFor(unlockFor === mat.id ? null : mat.id); setUnlockError(null); setUnlockCode(""); }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg hover:opacity-85 transition-opacity"
+                    style={{
+                      background: "var(--secondary)",
+                      color: "var(--muted-foreground)",
+                      fontSize: "0.78rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Lock size={13} />
+                    Members
+                  </button>
+                  {unlockFor === mat.id && (
+                    <div className="mt-2 flex flex-col gap-1.5" style={{ minWidth: "220px" }}>
+                      <input
+                        placeholder="Enter access code"
+                        value={unlockCode}
+                        onChange={e => { setUnlockCode(e.target.value); setUnlockError(null); }}
+                        className="px-3 py-2 rounded-lg outline-none"
+                        style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.82rem" }}
+                      />
+                      {unlockError && <span style={{ color: "#dc2626", fontSize: "0.78rem" }}>{unlockError}</span>}
+                      <button
+                        onClick={() => handleUnlock(mat.id)}
+                        disabled={unlockLoading || !unlockCode.trim()}
+                        className="px-3 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
+                        style={{ background: "var(--primary)", color: "#ffffff" }}
+                      >
+                        {unlockLoading ? "Unlocking…" : "Unlock"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

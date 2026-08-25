@@ -1,4 +1,7 @@
 import { Star, Users, Award, BookOpen, ArrowRight, ChevronRight } from "lucide-react";
+import { useApi } from "../lib/hooks";
+import { scheduleLabel } from "../lib/format";
+import type { TuitionClass } from "../lib/types";
 
 interface HomePageProps {
   onNavigate: (page: string) => void;
@@ -11,11 +14,7 @@ const stats = [
   { label: "Subjects Offered", value: "6" },
 ];
 
-const featuredClasses = [
-  { subject: "Mathematics", grade: "Grade 10 & 11", medium: "Sinhala / English", fee: "Rs. 2,500/month", day: "Mon & Thu", time: "4:00 – 6:00 PM", color: "#1a2744", badge: "Most Popular" },
-  { subject: "Science", grade: "Grade 8 & 9", medium: "Sinhala", fee: "Rs. 2,000/month", day: "Tue & Fri", time: "3:30 – 5:30 PM", color: "#2d4a7a", badge: "" },
-  { subject: "English", grade: "Grade 6 & 7", medium: "English", fee: "Rs. 1,800/month", day: "Wed & Sat", time: "9:00 – 11:00 AM", color: "#1e3a5f", badge: "New Batch" },
-];
+const cardColors = ["#1a2744", "#2d4a7a", "#1e3a5f"];
 
 const testimonials = [
   { name: "Dilnoza Perera", grade: "Grade 11 (2023)", text: "Sir's mathematics classes helped me achieve an A grade for O/Levels. His explanations are crystal clear and he never gives up on any student.", rating: 5 },
@@ -24,6 +23,9 @@ const testimonials = [
 ];
 
 export function HomePage({ onNavigate }: HomePageProps) {
+  const { data: classes } = useApi<TuitionClass[]>("/api/classes");
+  const featuredClasses = (classes ?? []).slice(0, 3);
+
   return (
     <div style={{ fontFamily: "var(--font-body)" }}>
       {/* Hero */}
@@ -118,24 +120,21 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {featuredClasses.map((cls, i) => (
-            <div key={i} className="rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <div className="p-5" style={{ background: cls.color }}>
+            <div key={cls.id} className="rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <div className="p-5" style={{ background: cardColors[i % cardColors.length] }}>
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 style={{ fontFamily: "var(--font-display)", color: "#ffffff", fontSize: "1.3rem", fontWeight: 600 }}>{cls.subject}</h3>
                     <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.85rem", marginTop: "0.25rem" }}>{cls.grade}</p>
                   </div>
-                  {cls.badge && (
-                    <span className="px-2 py-1 rounded-md" style={{ background: "var(--accent)", color: "var(--primary)", fontSize: "0.7rem", fontWeight: 600 }}>{cls.badge}</span>
-                  )}
                 </div>
               </div>
               <div className="p-5">
                 <div className="flex flex-col gap-2">
                   {[
                     { label: "Medium", val: cls.medium },
-                    { label: "Schedule", val: `${cls.day}, ${cls.time}` },
-                    { label: "Monthly Fee", val: cls.fee },
+                    { label: "Schedule", val: scheduleLabel(cls) },
+                    { label: "Monthly Fee", val: `Rs. ${cls.fee.toLocaleString()}/month` },
                   ].map(({ label, val }) => (
                     <div key={label} className="flex justify-between items-center py-1.5" style={{ borderBottom: "1px solid var(--border)" }}>
                       <span style={{ color: "var(--muted-foreground)", fontSize: "0.82rem" }}>{label}</span>
