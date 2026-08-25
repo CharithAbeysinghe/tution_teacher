@@ -60,5 +60,119 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
     res.json(user);
   });
 
+  const studentSelect = `
+    SELECT s.*, c.subject AS class_subject, c.grade AS class_grade
+    FROM students s LEFT JOIN classes c ON c.id = s.registered_class_id`;
+  function mapStudent(r) {
+    return {
+      id: r.id, fullName: r.full_name, dateOfBirth: r.date_of_birth, school: r.school,
+      parentName: r.parent_name, parentPhone: r.parent_phone, studentPhone: r.student_phone,
+      email: r.email, address: r.address,
+      preferredGrade: r.preferred_grade,
+      preferredSubject: r.preferred_subject, preferredMedium: r.preferred_medium,
+      previousResults: r.previous_results, source: r.source,
+      status: r.status, enrolledAt: r.enrolled_at, accessCode: r.access_code,
+      registeredClassId: r.registered_class_id, classSubject: r.class_subject, classGrade: r.class_grade,
+      createdAt: r.created_at,
+    };
+  }
+
+  router.get('/students', authGuard, (req, res) => {
+    const { status, search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const perPage = Math.min(100, Math.max(1, parseInt(req.query.perPage) || 20));
+    const where = []; const params = [];
+    if (status && ['pending', 'active', 'inactive'].includes(status)) { where.push('s.status = ?'); params.push(status); }
+    if (search) { where.push('(s.full_name LIKE ? OR s.student_phone LIKE ? OR s.parent_phone LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const total = db.prepare(`SELECT COUNT(*) c FROM students s ${whereSql}`).get(...params).c;
+    const rows = db.prepare(`${studentSelect} ${whereSql} ORDER BY s.created_at DESC, s.id DESC LIMIT ? OFFSET ?`)
+      .all(...params, perPage, (page - 1) * perPage);
+    res.json({ data: rows.map(mapStudent), total, page, perPage });
+  });
+
+  const GRADES = ['Grade 6', 'Grade 7', 'Grade 8', 'Grade 9', 'Grade 10', 'Grade 11'];
+  const SUBJECTS = ['Mathematics', 'Science', 'English'];
+  const newAccessCode = () => 'AC' + crypto.randomBytes(4).toString('hex').toUpperCase();
+
+  router.post('/students', authGuard, (req, res) => {
+    const schema = z.object({
+      name: z.string().trim().min(1),
+      phone: z.string().regex(/^[0-9+\-\s]{7,15}$/),
+      grade: z.enum(GRADES),
+      subject: z.enum(SUBJECTS),
+      medium: z.enum(['Sinhala', 'English']).optional(),
+      status: z.enum(['active', 'inactive']).default('active'),
+      enrolledAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    });
+    const p = schema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.') || '_', i.message])) });
+    const b = p.data;
+    const today = new Date().toISOString().slice(0, 10);
+    const code = b.status === 'active' ? newAccessCode() : null;
+    const info = db.prepare(`INSERT INTO students (full_name, student_phone, preferred_grade, preferred_subject, preferred_medium, status, enrolled_at, access_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(b.name, b.phone, b.grade, b.subject, b.medium || 'Sinhala', b.status, b.enrolledAt || today, code);
+    const row = db.prepare(`${studentSelect} WHERE s.id = ?`).get(info.lastInsertRowid);
+    res.status(201).json(mapStudent(row));
+  });
+
+  router.put('/students/:id', authGuard, (req, res) => {
+    const existing = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Student not found' });
+    const schema = z.object({
+      fullName: z.string().trim().min(1).optional(),
+      studentPhone: z.string().regex(/^[0-9+\-\s]{7,15}$/).optional().or(z.literal('')),
+      parentName: z.string().optional().or(z.literal('')),
+      parentPhone: z.string().regex(/^[0-9+\-\s]{7,15}$/).optional().or(z.literal('')),
+      email: z.string().email().optional().or(z.literal('')),
+      address: z.string().optional().or(z.literal('')),
+      school: z.string().optional().or(z.literal('')),
+      preferredGrade: z.enum(GRADES).optional(),
+      preferredSubject: z.enum(SUBJECTS).optional(),
+      preferredMedium: z.enum(['Sinhala', 'English']).optional(),
+      registeredClassId: z.number().int().nullable().optional(),
+    });
+    const p = schema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.') || '_', i.message])) });
+    const b = p.data;
+    const colMap = {
+      fullName: 'full_name', studentPhone: 'student_phone', parentName: 'parent_name',
+      parentPhone: 'parent_phone', email: 'email', address: 'address', school: 'school',
+      preferredGrade: 'preferred_grade', preferredSubject: 'preferred_subject',
+      preferredMedium: 'preferred_medium',
+    };
+    const sets = []; const params = [];
+    for (const [k, col] of Object.entries(colMap)) {
+      if (b[k] !== undefined) { sets.push(`${col} = ?`); params.push(b[k] === '' ? null : b[k]); }
+    }
+    if (b.registeredClassId !== undefined) { sets.push('registered_class_id = ?'); params.push(b.registeredClassId); }
+    if (!sets.length) return res.json(mapStudent(existing));
+    sets.push(`updated_at = datetime('now')`);
+    db.prepare(`UPDATE students SET ${sets.join(', ')} WHERE id = ?`).run(...params, existing.id);
+    res.json(mapStudent(db.prepare(`${studentSelect} WHERE s.id = ?`).get(existing.id)));
+  });
+
+  router.patch('/students/:id/status', authGuard, (req, res) => {
+    const schema = z.object({ status: z.enum(['pending', 'active', 'inactive']) });
+    const p = schema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(422).json({ errors: { status: 'Invalid status' } });
+    const existing = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Student not found' });
+    const { status } = p.data;
+    const today = new Date().toISOString().slice(0, 10);
+    db.prepare(`UPDATE students SET status = ?,
+        enrolled_at = CASE WHEN ? = 'active' AND enrolled_at IS NULL THEN ? ELSE enrolled_at END,
+        access_code = CASE WHEN ? = 'active' AND access_code IS NULL THEN ? ELSE access_code END,
+        updated_at = datetime('now')
+      WHERE id = ?`).run(status, status, today, status, newAccessCode(), existing.id);
+    res.json(mapStudent(db.prepare(`${studentSelect} WHERE s.id = ?`).get(existing.id)));
+  });
+
+  router.delete('/students/:id', authGuard, (req, res) => {
+    const info = db.prepare('DELETE FROM students WHERE id = ?').run(req.params.id);
+    if (!info.changes) return res.status(404).json({ error: 'Student not found' });
+    res.json({ ok: true });
+  });
+
   return router;
 }
