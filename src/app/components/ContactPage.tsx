@@ -1,17 +1,29 @@
 import { useState } from "react";
 import { Phone, Mail, MapPin, Clock, CheckCircle } from "lucide-react";
+import { api } from "../lib/api";
 
 export function ContactPage() {
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState({ name: "", phone: "", email: "", message: "" });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSent(true);
+    setSubmitting(true);
+    setServerErrors({});
+    try {
+      await api.post("/api/contacts", form);
+      setSent(true);
+    } catch (err: any) {
+      setServerErrors(err.errors ?? {});
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -80,14 +92,16 @@ export function ContactPage() {
                 <div key={name}>
                   <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>{label}</label>
                   <input name={name} type={type} placeholder={placeholder} required={name === "name"} value={(form as any)[name]} onChange={handleChange} className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                  {serverErrors[name] && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{serverErrors[name]}</p>}
                 </div>
               ))}
               <div>
                 <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>Message *</label>
                 <textarea name="message" placeholder="Your question or message…" rows={5} required value={form.message} onChange={handleChange} className="w-full px-4 py-2.5 rounded-lg outline-none resize-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                {serverErrors.message && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{serverErrors.message}</p>}
               </div>
-              <button type="submit" className="w-full py-3 rounded-xl hover:opacity-90 transition-opacity" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 600 }}>
-                Send Message
+              <button type="submit" disabled={submitting} className="w-full py-3 rounded-xl hover:opacity-90 transition-opacity" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 600, opacity: submitting ? 0.6 : 1 }}>
+                {submitting ? "Submitting…" : "Send Message"}
               </button>
             </form>
           )}

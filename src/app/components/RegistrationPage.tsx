@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckCircle } from "lucide-react";
+import { api } from "../lib/api";
 
 const grades = ["Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11"];
 const subjects = ["Mathematics", "Science", "English"];
@@ -7,6 +8,8 @@ const mediums = ["Sinhala", "English"];
 
 export function RegistrationPage() {
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState({
     studentName: "",
     dateOfBirth: "",
@@ -27,10 +30,21 @@ export function RegistrationPage() {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const fieldError = (name: string) => serverErrors[name] ?? (name === "studentName" ? serverErrors.fullName : undefined);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitted(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setSubmitting(true);
+    setServerErrors({});
+    try {
+      await api.post("/api/registrations", { ...form, fullName: form.studentName });
+      setSubmitted(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err: any) {
+      setServerErrors(err.errors ?? {});
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -87,6 +101,7 @@ export function RegistrationPage() {
                     className="w-full px-4 py-2.5 rounded-lg outline-none transition-all"
                     style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }}
                   />
+                  {fieldError(name) && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError(name)}</p>}
                 </div>
               ))}
               <div>
@@ -95,10 +110,12 @@ export function RegistrationPage() {
                   <option value="">Select grade</option>
                   {grades.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
+                {fieldError("grade") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("grade")}</p>}
               </div>
               <div>
                 <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>School *</label>
                 <input name="school" type="text" placeholder="Name of current school" required value={form.school} onChange={handleChange} className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                {fieldError("school") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("school")}</p>}
               </div>
             </div>
           </section>
@@ -118,11 +135,13 @@ export function RegistrationPage() {
                 <div key={name}>
                   <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>{label}</label>
                   <input name={name} type="text" placeholder={placeholder} required={required} value={(form as any)[name]} onChange={handleChange} className="w-full px-4 py-2.5 rounded-lg outline-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                  {fieldError(name) && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError(name)}</p>}
                 </div>
               ))}
               <div className="md:col-span-2">
                 <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>Home Address</label>
                 <textarea name="address" placeholder="Full residential address" rows={2} value={form.address} onChange={handleChange} className="w-full px-4 py-2.5 rounded-lg outline-none resize-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                {fieldError("address") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("address")}</p>}
               </div>
             </div>
           </section>
@@ -139,6 +158,7 @@ export function RegistrationPage() {
                   <option value="">Select subject</option>
                   {subjects.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
+                {fieldError("subject") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("subject")}</p>}
               </div>
               <div>
                 <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>Preferred Medium *</label>
@@ -146,10 +166,12 @@ export function RegistrationPage() {
                   <option value="">Select medium</option>
                   {mediums.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
+                {fieldError("medium") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("medium")}</p>}
               </div>
               <div className="md:col-span-2">
                 <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>Previous Term / Exam Results (optional)</label>
                 <textarea name="previousResults" placeholder="e.g. Term 1 - 72%, Term 2 - 68% (Mathematics)" rows={2} value={form.previousResults} onChange={handleChange} className="w-full px-4 py-2.5 rounded-lg outline-none resize-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.9rem" }} />
+                {fieldError("previousResults") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("previousResults")}</p>}
               </div>
               <div>
                 <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>How did you hear about us?</label>
@@ -157,12 +179,13 @@ export function RegistrationPage() {
                   <option value="">Select</option>
                   {["Friend / Family", "Facebook", "School Notice Board", "WhatsApp", "Google Search", "Other"].map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
+                {fieldError("howDidYouHear") && <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: "0.25rem" }}>{fieldError("howDidYouHear")}</p>}
               </div>
             </div>
           </section>
 
-          <button type="submit" className="w-full py-3.5 rounded-xl hover:opacity-90 transition-opacity" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 600, fontSize: "1rem" }}>
-            Submit Registration
+          <button type="submit" disabled={submitting} className="w-full py-3.5 rounded-xl hover:opacity-90 transition-opacity" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 600, fontSize: "1rem", opacity: submitting ? 0.6 : 1 }}>
+            {submitting ? "Submitting…" : "Submit Registration"}
           </button>
         </form>
       </div>
