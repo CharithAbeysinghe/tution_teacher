@@ -38,6 +38,9 @@ export function buildApp({ db, uploadsDir, rateLimiting = true, dataDir }) {
 
   // Central error handler
   app.use((err, req, res, next) => {
+    if (err?.message === 'DISALLOWED_EXT') {
+      return res.status(422).json({ error: 'File type not allowed' });
+    }
     if (err?.type === 'entity.too.large' || err?.code === 'LIMIT_FILE_SIZE') {
       return res.status(413).json({ error: 'Payload too large' });
     }

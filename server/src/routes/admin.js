@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { requireAdmin } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import { dashboardStats } from '../lib/stats.js';
 
 export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
   const router = Router();
@@ -296,8 +300,8 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
   }
   router.get('/messages', authGuard, (req, res) => {
     const sql = req.query.unreadOnly === '1'
-      ? 'SELECT * FROM contact_messages WHERE read_at IS NULL ORDER BY created_at DESC'
-      : 'SELECT * FROM contact_messages ORDER BY created_at DESC';
+      ? 'SELECT * FROM contact_messages WHERE read_at IS NULL ORDER BY created_at DESC, id DESC'
+      : 'SELECT * FROM contact_messages ORDER BY created_at DESC, id DESC';
     res.json(db.prepare(sql).all().map(mapMessage));
   });
   router.patch('/messages/:id/read', authGuard, (req, res) => {
@@ -309,6 +313,70 @@ export function adminRoutes(db, { uploadsDir, rateLimiting = true } = {}) {
     const info = db.prepare('DELETE FROM contact_messages WHERE id = ?').run(req.params.id);
     if (!info.changes) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
+  });
+
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, uploadsDir),
+      filename: (req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const ok = ['.pdf', '.mp4', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
+      cb(ok.includes(path.extname(file.originalname).toLowerCase()) ? null : new Error('DISALLOWED_EXT'), true);
+    },
+  });
+
+  const MATERIAL_TYPES = { pdf: 'application/pdf', video: 'video/mp4', image: 'image/png' };
+
+  router.get('/materials', authGuard, (req, res) => {
+    res.json(db.prepare('SELECT * FROM materials ORDER BY created_at DESC, id DESC').all().map((r) => ({
+      id: r.id, title: r.title, subject: r.subject, grade: r.grade, type: r.type,
+      storedName: r.stored_name, originalName: r.original_name, sizeBytes: r.size_bytes,
+      mimeType: r.mime_type, isFree: !!r.is_free, downloadsCount: r.downloads_count, createdAt: r.created_at,
+    })));
+  });
+
+  router.post('/materials', authGuard, upload.single('file'), (req, res, next) => {
+    const { title, subject, grade, type } = req.body;
+    const schema = z.object({
+      title: z.string().trim().min(1),
+      subject: z.enum(SUBJECTS),
+      grade: z.enum(GRADES),
+      type: z.enum(Object.keys(MATERIAL_TYPES)),
+      isFree: z.string().optional().default('false'),
+    });
+    const p = schema.safeParse(req.body);
+    if (!p.success) {
+      if (req.file) fs.promises.unlink(req.file.path).catch(() => {});
+      return res.status(422).json({ errors: Object.fromEntries(p.error.issues.map(i => [i.path.join('.'), i.message])) });
+    }
+    if (!req.file) return res.status(422).json({ errors: { file: 'File is required' } });
+    const info = db.prepare(`INSERT INTO materials (title, subject, grade, type, stored_name, original_name, size_bytes, mime_type, is_free)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(p.data.title, p.data.subject, p.data.grade, p.data.type, req.file.filename,
+           req.file.originalname, req.file.size, req.file.mimetype, p.data.isFree === 'true' ? 1 : 0);
+    const row = db.prepare('SELECT * FROM materials WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json({ id: row.id, title: row.title, isFree: !!row.is_free, storedName: row.stored_name });
+  });
+
+  router.patch('/materials/:id/free-toggle', authGuard, (req, res) => {
+    const existing = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    db.prepare('UPDATE materials SET is_free = ? WHERE id = ?').run(existing.is_free ? 0 : 1, existing.id);
+    res.json({ ok: true, isFree: !existing.is_free });
+  });
+
+  router.delete('/materials/:id', authGuard, (req, res) => {
+    const existing = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    db.prepare('DELETE FROM materials WHERE id = ?').run(existing.id);
+    try { fs.unlinkSync(path.join(uploadsDir, existing.stored_name)); } catch {}
+    res.json({ ok: true });
+  });
+
+  router.get('/dashboard', authGuard, (req, res) => {
+    res.json(dashboardStats(db));
   });
 
   return router;
