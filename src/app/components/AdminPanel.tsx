@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, BookOpen, Bell, FileText, BarChart3, Plus, Trash2, Edit2, X, TrendingUp, Mail, Check, Copy } from "lucide-react";
+import { Users, BookOpen, Bell, FileText, BarChart3, Plus, Trash2, Edit2, X, Mail, Check, Copy } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../lib/api";
 import { useApi } from "../lib/hooks";
@@ -190,10 +190,11 @@ export function AdminPanel() {
         await api.put(`/api/admin/students/${editingStudent.id}`, form);
       } else {
         await api.post("/api/admin/students", {
-          fullName: form.fullName,
-          studentPhone: form.studentPhone,
-          preferredGrade: form.preferredGrade,
-          preferredSubject: form.preferredSubject,
+          name: form.fullName,
+          phone: form.studentPhone,
+          grade: form.preferredGrade,
+          subject: form.preferredSubject,
+          medium: form.preferredMedium || "Sinhala",
           status: form.status,
         });
       }
@@ -218,7 +219,7 @@ export function AdminPanel() {
 
   const handleApprove = async (s: Student) => {
     try {
-      await api.patch(`/api/admin/students/${s.id}`, { status: "active" });
+      await api.patch(`/api/admin/students/${s.id}/status`, { status: "active" });
       refreshStudents();
     } catch (e: any) {
       alert(e.message || "Failed to approve student");
@@ -409,7 +410,7 @@ export function AdminPanel() {
   // Messages handlers
   const handleMarkRead = async (msg: ContactMessage) => {
     try {
-      await api.patch(`/api/admin/messages/${msg.id}`);
+      await api.patch(`/api/admin/messages/${msg.id}/read`);
       refreshMessages();
     } catch (e: any) {
       alert(e.message || "Failed to mark as read");
@@ -1018,11 +1019,15 @@ export function AdminPanel() {
                             </button>
                           </td>
                           <td className="px-4 py-3" style={{ color: "var(--muted-foreground)", fontSize: "0.82rem" }}>{m.downloadsCount}</td>
-                          <td className="px-4 py-3">
+                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1">
-                              <a href={`/api/materials/${m.id}/download`} className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "var(--secondary)" }} title="Download">
-                                <FileText size={14} style={{ color: "var(--primary)" }} />
-                              </a>
+                              {m.isFree ? (
+                                <a href={`/api/materials/${m.id}/download`} className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "var(--secondary)" }} title="Download">
+                                  <FileText size={14} style={{ color: "var(--primary)" }} />
+                                </a>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[0.7rem]" style={{ background: "var(--secondary)", color: "var(--muted-foreground)" }}>Members</span>
+                              )}
                               <button onClick={() => handleDeleteMaterial(m)} title="Delete" className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "#fdf2f2" }}>
                                 <Trash2 size={14} style={{ color: "#e74c3c" }} />
                               </button>
