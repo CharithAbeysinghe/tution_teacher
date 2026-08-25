@@ -3,7 +3,8 @@ import { Users, BookOpen, Bell, FileText, BarChart3, Plus, Trash2, Edit2, X, Tre
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../lib/api";
 import { useApi } from "../lib/hooks";
-import type { AdminUser, DashboardStats, Student, Paginated } from "../lib/types";
+import type { AdminUser, DashboardStats, Student, Paginated, TuitionClass } from "../lib/types";
+import { scheduleLabel, DAY_NAMES, fmtTime } from "../lib/format";
 
 const GRADES = ["Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11"];
 const SUBJECTS = ["Mathematics", "Science", "English"];
@@ -36,6 +37,30 @@ const emptyForm: StudentForm = {
   status: "pending",
 };
 
+type ScheduleSlot = { dayOfWeek: number; startTime: string; endTime: string; room: string };
+
+type ClassForm = {
+  subject: string;
+  grade: string;
+  medium: string;
+  fee: number;
+  capacity: number;
+  description: string;
+  isActive: boolean;
+  sessions: ScheduleSlot[];
+};
+
+const emptyClassForm: ClassForm = {
+  subject: "Mathematics",
+  grade: "Grade 6",
+  medium: "Sinhala",
+  fee: 2000,
+  capacity: 20,
+  description: "",
+  isActive: true,
+  sessions: [{ dayOfWeek: 1, startTime: "16:00", endTime: "18:00", room: "" }],
+};
+
 export function AdminPanel() {
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<AdminUser | null>(null);
@@ -54,6 +79,17 @@ export function AdminPanel() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  // Classes state
+  const [showClassForm, setShowClassForm] = useState(false);
+  const [editingClass, setEditingClass] = useState<TuitionClass | null>(null);
+  const [classForm, setClassForm] = useState<ClassForm>(emptyClassForm);
+  const [classFormErrors, setClassFormErrors] = useState<Record<string, string>>({});
+  const [classSaving, setClassSaving] = useState(false);
+
+  const { data: classes, loading: classesLoading, error: classesError, refresh: refreshClasses } = useApi<TuitionClass[]>(
+    user ? "/api/admin/classes" : null
+  );
 
   const studentsUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -176,6 +212,98 @@ export function AdminPanel() {
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 1500);
     });
+  };
+
+  const openAddClassForm = () => {
+    setEditingClass(null);
+    setClassForm(emptyClassForm);
+    setClassFormErrors({});
+    setShowClassForm(true);
+  };
+
+  const openEditClassForm = (cls: TuitionClass) => {
+    setEditingClass(cls);
+    setClassForm({
+      subject: cls.subject,
+      grade: cls.grade,
+      medium: cls.medium,
+      fee: cls.fee,
+      capacity: cls.capacity,
+      description: cls.description || "",
+      isActive: true,
+      sessions: cls.sessions.length > 0 ? cls.sessions.map(s => ({ dayOfWeek: s.dayOfWeek, startTime: s.startTime, endTime: s.endTime, room: s.room || "" })) : [{ dayOfWeek: 1, startTime: "16:00", endTime: "18:00", room: "" }],
+    });
+    setClassFormErrors({});
+    setShowClassForm(true);
+  };
+
+  const handleSaveClass = async () => {
+    setClassFormErrors({});
+    setClassSaving(true);
+    const payload = {
+      subject: classForm.subject,
+      grade: classForm.grade,
+      medium: classForm.medium,
+      fee: classForm.fee,
+      capacity: classForm.capacity,
+      description: classForm.description,
+      isActive: classForm.isActive,
+      sessions: classForm.sessions,
+    };
+    try {
+      if (editingClass) {
+        await api.put(`/api/admin/classes/${editingClass.id}`, payload);
+      } else {
+        await api.post("/api/admin/classes", payload);
+      }
+      setShowClassForm(false);
+      setEditingClass(null);
+      setClassForm(emptyClassForm);
+      refreshClasses();
+    } catch (e: any) {
+      if (e.status === 422 && e.errors) {
+        const mapped: Record<string, string> = {};
+        for (const [k, v] of Object.entries(e.errors)) {
+          mapped[k] = Array.isArray(v) ? v[0] : String(v);
+        }
+        setClassFormErrors(mapped);
+      } else {
+        setClassFormErrors({ _general: e.message || "Save failed" });
+      }
+    } finally {
+      setClassSaving(false);
+    }
+  };
+
+  const handleDeleteClass = async (cls: TuitionClass) => {
+    if (!confirm(`Delete ${cls.subject} — ${cls.grade}? This cannot be undone.`)) return;
+    try {
+      await api.del(`/api/admin/classes/${cls.id}`);
+      refreshClasses();
+    } catch (e: any) {
+      alert(e.message || "Failed to delete class");
+    }
+  };
+
+  const addScheduleSlot = () => {
+    setClassForm(f => ({
+      ...f,
+      sessions: [...f.sessions, { dayOfWeek: 1, startTime: "16:00", endTime: "18:00", room: "" }],
+    }));
+  };
+
+  const removeScheduleSlot = (idx: number) => {
+    setClassForm(f => ({
+      ...f,
+      sessions: f.sessions.filter((_, i) => i !== idx),
+    }));
+  };
+
+  const updateScheduleSlot = (idx: number, field: keyof ScheduleSlot, value: string | number) => {
+    setClassForm(f => ({
+      ...f,
+      sessions: f.sessions.map((s, i) => i === idx ? { ...s, [field]: value } : s),
+    }));
   };
 
   const students = paginatedStudents?.data ?? [];
@@ -505,37 +633,137 @@ export function AdminPanel() {
           {/* Classes */}
           {activeTab === "classes" && (
             <div>
-              <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Classes Management</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { subject: "Mathematics", grade: "Grade 10", medium: "Sinhala", fee: "Rs. 2,500", enrolled: 18, seats: 20, schedule: "Mon & Thu, 4–6 PM" },
-                  { subject: "Mathematics", grade: "Grade 11", medium: "English", fee: "Rs. 2,500", enrolled: 12, seats: 15, schedule: "Mon & Thu, 6–8 PM" },
-                  { subject: "Science", grade: "Grade 8", medium: "Sinhala", fee: "Rs. 2,000", enrolled: 14, seats: 20, schedule: "Tue & Fri, 3:30–5 PM" },
-                  { subject: "Science", grade: "Grade 9", medium: "Sinhala", fee: "Rs. 2,000", enrolled: 16, seats: 20, schedule: "Tue & Fri, 5–6:30 PM" },
-                  { subject: "English", grade: "Grade 6", medium: "English", fee: "Rs. 1,800", enrolled: 10, seats: 15, schedule: "Wed & Sat, 9–10:30 AM" },
-                  { subject: "English", grade: "Grade 7", medium: "English", fee: "Rs. 1,800", enrolled: 11, seats: 15, schedule: "Wed & Sat, 10:30–12 PM" },
-                ].map((cls, i) => (
-                  <div key={i} className="p-5 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 style={{ color: "var(--primary)", fontWeight: 600, fontSize: "0.95rem" }}>{cls.subject} — {cls.grade}</h3>
-                        <p style={{ color: "var(--muted-foreground)", fontSize: "0.8rem" }}>{cls.medium} Medium · {cls.schedule}</p>
-                      </div>
-                      <div className="flex gap-1">
-                        <button className="p-1.5 rounded-md" style={{ background: "var(--secondary)" }}><Edit2 size={13} style={{ color: "var(--primary)" }} /></button>
-                        <button className="p-1.5 rounded-md" style={{ background: "#fdf2f2" }}><Trash2 size={13} style={{ color: "#e74c3c" }} /></button>
-                      </div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700 }}>Classes Management</h2>
+                <button onClick={openAddClassForm} className="flex items-center gap-2 px-4 py-2 rounded-lg" style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 500, fontSize: "0.875rem" }}>
+                  <Plus size={15} /> Add Class
+                </button>
+              </div>
+
+              {showClassForm && (
+                <div className="p-5 rounded-2xl mb-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 style={{ color: "var(--primary)", fontWeight: 600, fontSize: "0.95rem" }}>{editingClass ? "Edit Class" : "Add New Class"}</h3>
+                    <button onClick={() => { setShowClassForm(false); setEditingClass(null); }}><X size={16} style={{ color: "var(--muted-foreground)" }} /></button>
+                  </div>
+                  {classFormErrors._general && <p style={{ color: "#e74c3c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>{classFormErrors._general}</p>}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Subject</label>
+                      <select value={classForm.subject} onChange={e => setClassForm(f => ({ ...f, subject: e.target.value }))} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: "var(--input-background)", border: `1px solid ${classFormErrors.subject ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
                     </div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span style={{ color: "var(--muted-foreground)", fontSize: "0.82rem" }}>{cls.enrolled}/{cls.seats} students</span>
-                      <span style={{ color: "var(--accent)", fontWeight: 600, fontSize: "0.85rem", fontFamily: "var(--font-mono)" }}>{cls.fee}/month</span>
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Grade</label>
+                      <select value={classForm.grade} onChange={e => setClassForm(f => ({ ...f, grade: e.target.value }))} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: "var(--input-background)", border: `1px solid ${classFormErrors.grade ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+                      </select>
                     </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--secondary)" }}>
-                      <div className="h-full rounded-full" style={{ width: `${(cls.enrolled / cls.seats) * 100}%`, background: "var(--accent)" }} />
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Medium</label>
+                      <select value={classForm.medium} onChange={e => setClassForm(f => ({ ...f, medium: e.target.value }))} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: "var(--input-background)", border: `1px solid ${classFormErrors.medium ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        {MEDIUMS.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Fee (Rs.)</label>
+                      <input type="number" value={classForm.fee} onChange={e => setClassForm(f => ({ ...f, fee: Number(e.target.value) }))} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: "var(--input-background)", border: `1px solid ${classFormErrors.fee ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.875rem" }} />
+                    </div>
+                    <div>
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Capacity</label>
+                      <input type="number" value={classForm.capacity} onChange={e => setClassForm(f => ({ ...f, capacity: Number(e.target.value) }))} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: "var(--input-background)", border: `1px solid ${classFormErrors.capacity ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.875rem" }} />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 cursor-pointer" style={{ color: "var(--foreground)", fontSize: "0.875rem" }}>
+                        <input type="checkbox" checked={classForm.isActive} onChange={e => setClassForm(f => ({ ...f, isActive: e.target.checked }))} className="rounded" />
+                        Active
+                      </label>
                     </div>
                   </div>
-                ))}
-              </div>
+                  <div className="mb-4">
+                    <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500, display: "block", marginBottom: "0.3rem" }}>Description</label>
+                    <textarea rows={2} value={classForm.description} onChange={e => setClassForm(f => ({ ...f, description: e.target.value }))} className="w-full px-3 py-2 rounded-lg outline-none resize-none" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: "0.875rem" }} placeholder="Optional description…" />
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <label style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 500 }}>Schedule</label>
+                      <button type="button" onClick={addScheduleSlot} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium" style={{ background: "var(--secondary)", color: "var(--primary)" }}>
+                        <Plus size={12} /> Add slot
+                      </button>
+                    </div>
+                    {classForm.sessions.map((slot, idx) => (
+                      <div key={idx} className="flex flex-wrap items-end gap-2 mb-2 p-3 rounded-xl" style={{ background: "var(--secondary)" }}>
+                        <div>
+                          <label style={{ color: "var(--muted-foreground)", fontSize: "0.72rem", display: "block", marginBottom: "0.2rem" }}>Day</label>
+                          <select value={slot.dayOfWeek} onChange={e => updateScheduleSlot(idx, "dayOfWeek", Number(e.target.value))} className="px-2 py-1.5 rounded-lg outline-none text-xs" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
+                            {DAY_NAMES.map((d, i) => <option key={i + 1} value={i + 1}>{d}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ color: "var(--muted-foreground)", fontSize: "0.72rem", display: "block", marginBottom: "0.2rem" }}>Start</label>
+                          <input type="time" value={slot.startTime} onChange={e => updateScheduleSlot(idx, "startTime", e.target.value)} className="px-2 py-1.5 rounded-lg outline-none text-xs" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
+                        </div>
+                        <div>
+                          <label style={{ color: "var(--muted-foreground)", fontSize: "0.72rem", display: "block", marginBottom: "0.2rem" }}>End</label>
+                          <input type="time" value={slot.endTime} onChange={e => updateScheduleSlot(idx, "endTime", e.target.value)} className="px-2 py-1.5 rounded-lg outline-none text-xs" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
+                        </div>
+                        <div className="flex-1 min-w-[100px]">
+                          <label style={{ color: "var(--muted-foreground)", fontSize: "0.72rem", display: "block", marginBottom: "0.2rem" }}>Room</label>
+                          <input type="text" value={slot.room} onChange={e => updateScheduleSlot(idx, "room", e.target.value)} placeholder="e.g. Room A" className="w-full px-2 py-1.5 rounded-lg outline-none text-xs" style={{ background: "var(--input-background)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
+                        </div>
+                        {classForm.sessions.length > 1 && (
+                          <button type="button" onClick={() => removeScheduleSlot(idx)} className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "#fdf2f2" }}>
+                            <Trash2 size={12} style={{ color: "#e74c3c" }} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <button onClick={handleSaveClass} disabled={classSaving} className="px-5 py-2 rounded-lg disabled:opacity-50" style={{ background: "var(--accent)", color: "var(--primary)", fontWeight: 600, fontSize: "0.875rem" }}>
+                    {classSaving ? "Saving…" : "Save Class"}
+                  </button>
+                </div>
+              )}
+
+              {classesError && <p style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "1rem" }}>{classesError}</p>}
+
+              {classesLoading ? (
+                <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Loading classes…</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(classes ?? []).map((cls) => (
+                    <div key={cls.id} className="p-5 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h3 style={{ color: "var(--primary)", fontWeight: 600, fontSize: "0.95rem" }}>{cls.subject} — {cls.grade}</h3>
+                          <p style={{ color: "var(--muted-foreground)", fontSize: "0.8rem" }}>{cls.medium} Medium · {scheduleLabel(cls)}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={() => openEditClassForm(cls)} title="Edit" className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "var(--secondary)" }}>
+                            <Edit2 size={13} style={{ color: "var(--primary)" }} />
+                          </button>
+                          <button onClick={() => handleDeleteClass(cls)} title="Delete" className="p-1.5 rounded-md hover:opacity-70 transition-opacity" style={{ background: "#fdf2f2" }}>
+                            <Trash2 size={13} style={{ color: "#e74c3c" }} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span style={{ color: "var(--muted-foreground)", fontSize: "0.82rem" }}>{cls.enrolled}/{cls.capacity} students</span>
+                        <span style={{ color: "var(--accent)", fontWeight: 600, fontSize: "0.85rem", fontFamily: "var(--font-mono)" }}>Rs. {cls.fee.toLocaleString()}/month</span>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--secondary)" }}>
+                        <div className="h-full rounded-full" style={{ width: `${cls.capacity > 0 ? (cls.enrolled / cls.capacity) * 100 : 0}%`, background: "var(--accent)" }} />
+                      </div>
+                    </div>
+                  ))}
+                  {(classes ?? []).length === 0 && (
+                    <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem", gridColumn: "1 / -1" }}>No classes yet. Click "Add Class" to create one.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
