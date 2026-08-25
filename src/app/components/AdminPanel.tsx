@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { Users, BookOpen, Bell, FileText, BarChart3, Plus, Trash2, Edit2, X, TrendingUp } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Users, BookOpen, Bell, FileText, BarChart3, Plus, Trash2, Edit2, X, TrendingUp, Mail } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-const adminPassword = "admin123";
+import { api } from "../lib/api";
+import { useApi } from "../lib/hooks";
+import type { AdminUser, DashboardStats } from "../lib/types";
 
 const initialStudents = [
   { id: 1, name: "Dilnoza Perera", grade: "Grade 11", subject: "Mathematics", phone: "071 234 5678", enrolled: "2024-09-01", status: "Active" },
@@ -12,29 +13,64 @@ const initialStudents = [
   { id: 5, name: "Sithum Rathnayake", grade: "Grade 11", subject: "Mathematics", phone: "071 678 9012", enrolled: "2024-09-15", status: "Active" },
 ];
 
-const chartData = [
-  { month: "Jul", students: 32 }, { month: "Aug", students: 38 }, { month: "Sep", students: 45 },
-  { month: "Oct", students: 48 }, { month: "Nov", students: 51 }, { month: "Dec", students: 47 },
-];
-
 const tabs = [
   { id: "dashboard", label: "Dashboard", icon: BarChart3 },
   { id: "students", label: "Students", icon: Users },
   { id: "classes", label: "Classes", icon: BookOpen },
   { id: "announcements", label: "Announcements", icon: Bell },
   { id: "materials", label: "Materials", icon: FileText },
+  { id: "messages", label: "Messages", icon: Mail },
 ];
 
 export function AdminPanel() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [password, setPassword] = useState("");
+  const [checking, setChecking] = useState(true);
+  const [user, setUser] = useState<AdminUser | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [students, setStudents] = useState(initialStudents);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: "", grade: "Grade 6", subject: "Mathematics", phone: "", enrolled: new Date().toISOString().split("T")[0], status: "Active" });
 
-  if (!authenticated) {
+  useEffect(() => {
+    api.get<AdminUser>("/api/admin/me")
+      .then((u) => setUser(u))
+      .catch(() => setUser(null))
+      .finally(() => setChecking(false));
+  }, []);
+
+  const { data: stats, loading: statsLoading } = useApi<DashboardStats>(
+    user ? "/api/admin/dashboard" : null
+  );
+
+  const handleLogin = async () => {
+    setAuthError("");
+    try {
+      const u = await api.post<AdminUser>("/api/admin/login", { email: loginEmail, password: loginPassword });
+      setUser(u);
+      setLoginEmail("");
+      setLoginPassword("");
+    } catch (e: any) {
+      setAuthError(e.status === 401 ? "Invalid email or password" : (e.message || "Login failed"));
+    }
+  };
+
+  const handleLogout = async () => {
+    await api.post("/api/admin/logout").catch(() => {});
+    setUser(null);
+    setActiveTab("dashboard");
+  };
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--background)" }}>
+        <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Checking session…</p>
+      </div>
+    );
+  }
+
+  if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "var(--background)" }}>
         <div className="w-full max-w-sm p-8 rounded-2xl shadow-lg" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
@@ -43,35 +79,42 @@ export function AdminPanel() {
               <Users size={24} style={{ color: "var(--accent)" }} />
             </div>
             <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700 }}>Admin Login</h2>
-            <p style={{ color: "var(--muted-foreground)", fontSize: "0.85rem", marginTop: "0.4rem" }}>Enter password to continue</p>
+            <p style={{ color: "var(--muted-foreground)", fontSize: "0.85rem", marginTop: "0.4rem" }}>Enter your credentials to continue</p>
           </div>
           <div>
+            <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>Email</label>
+            <input
+              type="email"
+              placeholder="admin@aravinda.com"
+              value={loginEmail}
+              onChange={e => setLoginEmail(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleLogin(); }}
+              className="w-full px-4 py-2.5 rounded-lg outline-none mb-3"
+              style={{ background: "var(--input-background)", border: `1px solid ${authError ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.9rem" }}
+            />
             <label style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 500, display: "block", marginBottom: "0.4rem" }}>Password</label>
             <input
               type="password"
-              placeholder="Enter admin password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") { if (password === adminPassword) { setAuthenticated(true); setAuthError(""); } else { setAuthError("Incorrect password. Try: admin123"); } } }}
+              placeholder="Enter password"
+              value={loginPassword}
+              onChange={e => setLoginPassword(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleLogin(); }}
               className="w-full px-4 py-2.5 rounded-lg outline-none mb-3"
               style={{ background: "var(--input-background)", border: `1px solid ${authError ? "#e74c3c" : "var(--border)"}`, color: "var(--foreground)", fontSize: "0.9rem" }}
             />
             {authError && <p style={{ color: "#e74c3c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>{authError}</p>}
             <button
-              onClick={() => { if (password === adminPassword) { setAuthenticated(true); setAuthError(""); } else { setAuthError("Incorrect password. Try: admin123"); } }}
+              onClick={handleLogin}
               className="w-full py-2.5 rounded-lg hover:opacity-90 transition-opacity"
               style={{ background: "var(--primary)", color: "#ffffff", fontWeight: 600 }}
             >
               Login
             </button>
           </div>
-          <p style={{ color: "var(--muted-foreground)", fontSize: "0.75rem", textAlign: "center", marginTop: "1.5rem" }}>Demo password: admin123</p>
         </div>
       </div>
     );
   }
-
-  const activeStudents = students.filter(s => s.status === "Active").length;
 
   return (
     <div style={{ fontFamily: "var(--font-body)", minHeight: "100vh", background: "var(--background)" }}>
@@ -81,7 +124,7 @@ export function AdminPanel() {
           <h1 style={{ fontFamily: "var(--font-display)", color: "#ffffff", fontSize: "1.25rem", fontWeight: 700 }}>Admin Panel</h1>
           <p style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.78rem" }}>Mr. Aravinda's Tuition Classes</p>
         </div>
-        <button onClick={() => setAuthenticated(false)} className="px-3 py-1.5 rounded-lg" style={{ border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)", fontSize: "0.8rem" }}>
+        <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg" style={{ border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)", fontSize: "0.8rem" }}>
           Logout
         </button>
       </div>
@@ -128,31 +171,39 @@ export function AdminPanel() {
           {activeTab === "dashboard" && (
             <div>
               <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Dashboard</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                {[
-                  { label: "Total Students", value: students.length, color: "var(--primary)" },
-                  { label: "Active Students", value: activeStudents, color: "#2d9e5f" },
-                  { label: "Classes Running", value: 6, color: "#1a6b9c" },
-                  { label: "Monthly Revenue", value: "Rs. 127,500", color: "#7c3d8f" },
-                ].map((stat, i) => (
-                  <div key={i} className="p-5 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                    <div style={{ color: stat.color, fontSize: "1.6rem", fontWeight: 700, fontFamily: "var(--font-display)" }}>{stat.value}</div>
-                    <div style={{ color: "var(--muted-foreground)", fontSize: "0.8rem", marginTop: "0.25rem" }}>{stat.label}</div>
+              {statsLoading ? (
+                <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Loading dashboard…</p>
+              ) : stats ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    {[
+                      { label: "Total Students", value: stats.totalStudents, color: "var(--primary)" },
+                      { label: "Active Students", value: stats.activeStudents, color: "#2d9e5f" },
+                      { label: "Classes Running", value: stats.classesRunning, color: "#1a6b9c" },
+                      { label: "Monthly Revenue", value: `Rs. ${stats.monthlyRevenue.toLocaleString()}`, color: "#7c3d8f" },
+                    ].map((stat, i) => (
+                      <div key={i} className="p-5 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                        <div style={{ color: stat.color, fontSize: "1.6rem", fontWeight: 700, fontFamily: "var(--font-display)" }}>{stat.value}</div>
+                        <div style={{ color: "var(--muted-foreground)", fontSize: "0.8rem", marginTop: "0.25rem" }}>{stat.label}</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className="p-6 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                <h3 style={{ color: "var(--primary)", fontWeight: 600, fontSize: "0.95rem", marginBottom: "1.5rem" }}>Student Enrollment (Last 6 Months)</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="month" tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)" }} />
-                    <Bar dataKey="students" fill="var(--accent)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+                  <div className="p-6 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                    <h3 style={{ color: "var(--primary)", fontWeight: 600, fontSize: "0.95rem", marginBottom: "1.5rem" }}>Student Enrollment (Last 6 Months)</h3>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={stats.enrollmentByMonth}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                        <XAxis dataKey="month" tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)" }} />
+                        <Bar dataKey="students" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
+              ) : (
+                <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>No data available.</p>
+              )}
             </div>
           )}
 
@@ -356,6 +407,14 @@ export function AdminPanel() {
                   <button className="px-5 py-2.5 rounded-lg w-fit" style={{ background: "var(--accent)", color: "var(--primary)", fontWeight: 600 }}>Upload Material</button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Messages */}
+          {activeTab === "messages" && (
+            <div>
+              <h2 style={{ fontFamily: "var(--font-display)", color: "var(--primary)", fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>Messages</h2>
+              <p style={{ color: "var(--muted-foreground)", fontSize: "0.9rem" }}>Coming in next step</p>
             </div>
           )}
         </div>
